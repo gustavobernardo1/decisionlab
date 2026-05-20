@@ -10,7 +10,7 @@ A versão web da plataforma será disponibilizada posteriormente.
 
 Quando publicada, o link ficará disponível aqui:
 
-https://decisionlab.vercel.app
+https://decisionlabproject.vercel.app
 ---
 
 ## Sobre o projeto
