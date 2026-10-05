@@ -1,112 +1,50 @@
-# DecisionLab
+# DecisionLab — Estúdio de decisões
 
-**DecisionLab** é uma plataforma computacional em desenvolvimento para apoio à tomada de decisão sob incerteza, vinculada ao projeto de Iniciação Científica **“Tomada de decisão sob o ponto de vista da teoria de incertezas”**, desenvolvido no Instituto de Matemática e Estatística da Universidade Federal de Goiás.
+Plataforma local para estruturar, comparar e explicar decisões multicritério. A interface está em português e funciona sem instalar bibliotecas externas. O percurso tem cinco etapas: Problema, Modelo, Julgamentos, Desempenho e Interpretação.
 
-A proposta da aplicação é reunir, em um ambiente interativo, métodos estudados na pesquisa para modelagem, comparação e análise de problemas de Tomada de Decisão Multiatributo.
+## Começar
 
-Versão web
+1. Instale Node.js 20 ou mais recente.
+2. Nesta pasta, execute `node server.js`.
+3. Abra `http://127.0.0.1:4173` no navegador.
 
-A versão web da plataforma será disponibilizada posteriormente.
+Se o Node.js já estiver configurado com npm, `npm start` também funciona. Para rodar os testes matemáticos, execute `npm test`.
 
-Quando publicada, o link ficará disponível aqui:
+Para publicar como site estático na Vercel, defina esta pasta como diretório raiz do projeto. `vercel.json` configura o projeto como estático e `npm run build` copia apenas os arquivos da aplicação para `dist/`. O servidor local não é necessário na hospedagem.
 
-https://decisionlabproject.vercel.app
----
+## O que está incluído
 
-## Sobre o projeto
+- Tela inicial com três casos prontos: **“Qual celular comprar?”**, **“Qual fornecedor escolher?”** e **“Onde morar durante a faculdade?”**. Os dois primeiros começam em AHP; o terceiro apresenta uma rede ANP. Cada caso traz pergunta fixa, três opções fictícias, critérios e desempenhos ilustrativos. Os julgamentos começam vazios para o estudante fazer a análise.
+- Cada cartão de exemplo permite começar, continuar uma análise incompleta ou refazer o caso, sem apagar análises anteriores.
+- Ao concluir o exemplo, a tela de interpretação oferece **Criar minha análise do zero**. Essa nova análise inicia sem critérios nem alternativas.
+- Painel de análises com criação, duplicação e exclusão.
+- Salvamento automático no `localStorage` do navegador.
+- Importação e exportação de análises em JSON; exportação do ranking em CSV.
+- Interface Estúdio de decisões: cartões de julgamento em azul e coral, percurso lateral de cinco etapas e layouts para desktop e celular.
+- Mapa editável no início da etapa Modelo: hierarquia de objetivo, critérios selecionáveis e alternativas no AHP; rede de influências com setas curvas no ANP. A escolha AHP/ANP pode ser feita no próprio mapa.
+- No celular, a hierarquia e o editor de critérios se organizam verticalmente; o desempenho das alternativas aparece em cartões com campos identificados, sem exigir rolagem horizontal da matriz.
+- Julgamentos guiados, um par por vez: escolha o critério preferido, ajuste a intensidade de 1 a 9 e consulte a escala completa de Saaty ao lado. A intensidade 1 registra igualdade diretamente.
+- Modelo AHP com comparações exatas ou fuzzy triangulares opcionais, autovetor principal no caso exato, média geométrica fuzzy no caso aproximado e razão de consistência.
+- Modelo ANP de **um grupo de critérios**, com editor de influências, comparações locais exatas ou fuzzy, supermatriz estocástica e vetor limite.
+- Avaliação das alternativas por notas de 0 a 10 ou por valores brutos normalizados em cada critério.
+- Ranking, contribuições por critério, consistência e análise de sensibilidade dos pesos finais.
+- Prévia do relatório com objetivo, ranking, pesos, desempenho, consistência, sensibilidade e método; opção de baixar HTML ou imprimir/salvar em PDF pelo navegador.
+- Animações curtas para entrada dos julgamentos, barras do ranking e rede; respeitam a preferência por movimento reduzido do sistema.
 
-Em muitos problemas reais, a escolha entre alternativas depende de múltiplos critérios e envolve julgamentos humanos, que podem carregar subjetividade, imprecisão e diferentes graus de preferência.
+## Definições metodológicas
 
-O DecisionLab busca transformar esses julgamentos em estruturas matemáticas analisáveis, permitindo que o usuário:
+Esta versão usa AHP ou ANP **para obter pesos dos critérios** e, em seguida, uma soma ponderada para pontuar as alternativas. Ela não implementa comparações par a par entre alternativas. O ANP está restrito a um grupo de critérios: relações de influência definem as colunas da supermatriz, e as alternativas entram depois como dados de desempenho. A rede ANP precisa ser fortemente conectada e ter ao menos uma autoinfluência para que a potência da supermatriz convirja ao vetor limite.
 
-- cadastre critérios e alternativas;
-- realize comparações par a par;
-- calcule pesos ou vetores de prioridade;
-- analise a consistência dos julgamentos;
-- compare diferentes métodos de obtenção de pesos;
-- visualize o ranqueamento final das alternativas.
+Em AHP e ANP, cada resposta usa a escala recíproca de Saaty de 1 a 9. O modo **Exato** registra um valor único. Em **Aproximado**, a plataforma transforma a intensidade escolhida em um número fuzzy triangular (intensidade adjacente inferior, valor escolhido, intensidade adjacente superior, com limites na escala). Em **Definir faixa**, o usuário escolhe os extremos plausíveis em torno do valor central. A comparação recíproca é gerada automaticamente. Julgamentos sem faixa permanecem exatos. Se houver ao menos uma faixa, as prioridades locais vêm da média geométrica fuzzy das linhas, normalização triangular aproximada e centroide normalizado. No AHP, essas prioridades são os pesos dos critérios. No ANP, os centroides normalizados de cada conjunto local preenchem uma supermatriz **pontual**, cujo limite fornece os pesos finais. Portanto, esta implementação não calcula uma supermatriz fuzzy nem intervalos fuzzy para o ranking. Os limites triangulares não são probabilidades nem intervalos de confiança. A razão de consistência é calculada na matriz dos valores centrais.
 
----
+No modo **nota de 0 a 10**, 10 significa melhor desempenho em todos os critérios. No modo **valor bruto**, o menor e o maior valor de cada critério definem a escala relativa; critérios de custo são invertidos. Com valores idênticos, todas as alternativas recebem desempenho igual naquele critério.
 
-## Métodos estudados
+A análise de sensibilidade varia cada peso final, redistribuindo os demais proporcionalmente. Ela **não** recalcula os julgamentos AHP/ANP. A razão de consistência usa índices aleatórios tabelados para até 10 critérios.
 
-A plataforma está sendo desenvolvida a partir dos métodos estudados na Iniciação Científica, incluindo:
+As bases metodológicas consultadas foram [Buckley (1985), sobre médias geométricas fuzzy](https://www.sciencedirect.com/science/article/pii/0165011485900909), e [Saaty, sobre a supermatriz do ANP](https://www.ejpam.com/ejpam/article/download/6/18/0). A combinação de prioridades locais fuzzy defuzzificadas com a supermatriz pontual é uma escolha explícita desta implementação.
 
-- Processo Hierárquico Analítico (PHA/AHP);
-- método do autovetor principal;
-- método da média geométrica;
-- método de programação linear;
-- extensões fuzzy do PHA;
-- método fuzzy lambda-max;
-- análise de consistência;
-- representação de julgamentos incertos por números fuzzy triangulares.
+## Dados e limites
 
----
+Os dados ficam apenas no navegador utilizado. Limpar os dados do site pode apagar análises; exporte JSON para backup. Esta versão não possui conta, sincronização, colaboração, banco de dados nem publicação automática. Admite até 10 critérios e 25 alternativas por análise.
 
-## Funcionalidades previstas
-
-A aplicação organiza o processo decisório em etapas:
-
-1. **Configuração do problema**  
-   Cadastro do objetivo, critérios e alternativas.
-
-2. **Comparação par a par**  
-   Preenchimento da matriz de julgamentos entre critérios.
-
-3. **Cálculo dos pesos**  
-   Aplicação dos métodos estudados para obter o vetor de prioridades.
-
-4. **Avaliação das alternativas**  
-   Atribuição de notas ou valores para cada alternativa em relação aos critérios.
-
-5. **Resultados**  
-   Visualização do ranking final, gráficos comparativos e medidas de consistência.
-
-6. **Comparação entre métodos**  
-   Análise da estabilidade dos resultados obtidos por diferentes métodos.
-
----
-
-## Estado atual
-
-Este repositório contém um **protótipo em desenvolvimento** da plataforma DecisionLab.
-
-A versão atual ainda está em fase de implementação e validação dos métodos matemáticos. Novas funcionalidades, melhorias de interface e ajustes conceituais serão adicionados ao longo do desenvolvimento da pesquisa.
-
----
-
-## Tecnologias utilizadas
-
-A aplicação está sendo desenvolvida com:
-
-- Next.js;
-- React;
-- TypeScript;
-- Tailwind CSS;
-- shadcn/ui;
-- Recharts.
-
----
-
-## Como executar localmente
-
-Clone o repositório:
-
-bash
-git clone https://github.com/gustavobernardo1/decisionlab.git
-
-Acesse a pasta do projeto:
-
-cd decisionlab
-
-Instale as dependências:
-
-npm install
-
-Execute o servidor de desenvolvimento:
-
-npm run dev
-
-Abra no navegador:
-
-http://localhost:3000
+O código matemático é determinístico e tem testes de referência em `tests/math.test.js`. As opções e os valores dos exemplos são fictícios; não representam especificações ou preços de mercado. Para uso acadêmico formal ou decisões de alto impacto, valide a modelagem e os resultados com casos de referência da sua pesquisa.
