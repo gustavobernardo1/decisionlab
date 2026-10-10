@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.js",
     "start": "node server.js",
-    "test": "node --test tests/*.test.js"
+    "lint": "node --check app.js && node --check math.js && node --check server.js && node --check build.mjs",
+    "test": "node --test tests/math.test.js",
+    "build": "node build.mjs"
   }
 }

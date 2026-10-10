@@ -5,12 +5,12 @@ Plataforma local para estruturar, comparar e explicar decisões multicritério. 
 ## Começar
 
 1. Instale Node.js 20 ou mais recente.
-2. Nesta pasta, execute `node server.js`.
+2. Nesta pasta, execute `npm ci` e `npm start`.
 3. Abra `http://127.0.0.1:4173` no navegador.
 
-Se o Node.js já estiver configurado com npm, `npm start` também funciona. Para rodar os testes matemáticos, execute `npm test`.
+Para conferir o projeto, execute `npm run lint`, `npm test` e `npm run build`.
 
-Para publicar como site estático na Vercel, defina esta pasta como diretório raiz do projeto. `vercel.json` configura o projeto como estático e `npm run build` copia apenas os arquivos da aplicação para `dist/`. O servidor local não é necessário na hospedagem.
+Na Vercel, `vercel.json` define a instalação com `npm ci`, o build com `npm run build` e a publicação da pasta `dist`. O servidor local não é usado na hospedagem. Nenhuma variável de ambiente é necessária para a aplicação publicada.
 
 ## O que está incluído
 
