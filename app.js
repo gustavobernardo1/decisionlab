@@ -40,7 +40,12 @@ function load() {
     return Array.isArray(projects) ? projects : [];
   } catch { return []; }
 }
-const state = { projects: load(), projectId: null, view: "home", target: null, judgmentIndex: 0, fuzzyCustomFor: null, toast: "" };
+const state = { projects: load(), projectId: null, view: "home", target: null, judgmentIndex: 0, fuzzyCustomFor: null, toast: "",
+  judgmentMode: (() => {
+    try { const preference = localStorage.getItem("decisionlab.judgmentMode");
+      return preference === "guided" || preference === "matrix" ? preference : (window.matchMedia("(max-width: 760px)").matches ? "guided" : "matrix");
+    } catch { return "matrix"; }
+  })(), matrixPair: null };
 function project() { return state.projects.find(item => item.id === state.projectId); }
 function save() {
   const active = project();
@@ -149,6 +154,7 @@ function selectProject(id, view = "overview") {
   state.view = view;
   state.target = project()?.criteria[0]?.id || null;
   state.judgmentIndex = 0;
+  state.matrixPair = null;
   state.fuzzyCustomFor = null;
   render();
 }
@@ -185,6 +191,28 @@ function analyses(item) {
     return { model: { ready: false, reason: error.message }, evaluation: evaluationStatus(item), ranking: null };
   }
 }
+// Ações contextuais aparecem quando o cabeçalho da etapa sai da área visível.
+const STEP_VIEWS = ["overview", "structure", "judgments", "evaluations", "results"];
+function stageDock(item) {
+  const index = STEP_VIEWS.indexOf(state.view);
+  if (!item || index < 0 || index >= STEP_VIEWS.length - 1 || state.reportOpen) return "";
+  const names = ["Problema", "Modelo", "Julgamentos", "Desempenho", "Interpretação"];
+  const next = ["Montar o modelo", "Abrir julgamentos", "Avaliar alternativas", "Ver interpretação"];
+  return '<nav class="stage-dock" aria-label="Ações da etapa" aria-hidden="true" inert>' +
+    '<div class="stage-dock-info"><span>ETAPA ' + String(index + 1).padStart(2, '0') + ' DE 05</span><strong>' + names[index] + '</strong></div>' +
+    '<div class="stage-dock-buttons">' + (index > 0 ? '<button type="button" class="button secondary" data-action="view" data-view="' + STEP_VIEWS[index - 1] + '">' + icon('back') + ' Voltar</button>' : '') +
+    '<button type="button" class="button" data-action="view" data-view="' + STEP_VIEWS[index + 1] + '">' + next[index] + ' ' + icon('arrow') + '</button></div></nav>';
+}
+function syncStageDock() {
+  const dock = document.querySelector('.stage-dock');
+  if (!dock) return;
+  const heading = document.querySelector('.workspace-head');
+  const visible = Boolean(heading && heading.getBoundingClientRect().bottom < 0);
+  dock.classList.toggle('is-visible', visible);
+  dock.setAttribute('aria-hidden', String(!visible));
+  dock.inert = !visible;
+}
+
 function shell(content) {
   const item = project();
   const nav = item ? [
@@ -205,7 +233,7 @@ function shell(content) {
     '</nav></div><div class="sidebar-bottom">' + (item ? '<button class="back-to-projects" type="button" data-action="home">← Todas as análises</button><p>' + (item.guided ? "Exemplo guiado. A pergunta deste caso é fixa; você pode experimentar julgamentos e desempenhos." : "Sua análise é salva neste navegador. Exporte um JSON para guardar uma cópia.") + '</p>' : "Seus projetos ficam neste navegador. Exporte um JSON para guardar uma cópia.") + '</div></aside>' +
     '<main class="main"><header class="topbar"><div class="topbar-left"><span class="crumb">' + (item ? "MINHAS ANÁLISES /" : "PLATAFORMA /") + '</span><span class="topbar-title">' + escapeHtml(item ? item.title : "Visão geral") + '</span></div><div class="topbar-right"><span class="saved">' + (item ? "● Salvo neste navegador" : "AHP · ANP") + '</span>' +
     (item ? '<button class="button secondary small-btn" data-action="export-json">' + icon("download") + ' Exportar</button>' : '<button class="button secondary small-btn" data-action="import">' + icon("upload") + ' Importar</button>') +
-    '</div></header><div class="page' + (state.reportOpen ? ' report-active' : '') + '">' + content + '</div></main></div><input id="import-file" type="file" accept="application/json,.json" hidden>';
+    '</div></header><div class="page' + (state.reportOpen ? ' report-active' : '') + '">' + content + '</div>' + stageDock(item) + '</main></div><input id="import-file" type="file" accept="application/json,.json" hidden>';
 }
 function home() {
   const recent = [...state.projects].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 4);
@@ -451,6 +479,106 @@ function saatyGuide(current, check, isAnp) {
     (check ? '<div class="notice ' + (check.acceptable ? "" : "warn") + '">CR: <strong>' + (check.available ? pct(check.cr, 1) : "indisponível") + '</strong>. ' + (check.available ? (check.acceptable ? "Dentro do limite de 10%." : "Revise os julgamentos.") : "Há mais de 10 elementos.") + '</div>' :
       '<div class="notice">Complete o conjunto para verificar a consistência.</div>') + '</section></aside>';
 }
+// Julgamentos compactos: a mesma estrutura de comparações alimenta os modos guiado e matriz.
+function judgmentModeSwitch() {
+  return '<div class="judgment-mode-toolbar" role="group" aria-label="Formato dos julgamentos">' +
+    '<div><strong>Como deseja comparar?</strong><span>Alterne os formatos sem perder suas respostas.</span></div>' +
+    '<div class="judgment-mode-buttons">' +
+    '<button type="button" data-action="judgment-mode" data-mode="matrix" class="' + (state.judgmentMode === "matrix" ? "active" : "") + '" aria-pressed="' + (state.judgmentMode === "matrix") + '">' + icon("table") + ' Matriz</button>' +
+    '<button type="button" data-action="judgment-mode" data-mode="guided" class="' + (state.judgmentMode === "guided" ? "active" : "") + '" aria-pressed="' + (state.judgmentMode === "guided") + '">' + icon("compare") + ' Guiado</button></div></div>';
+}
+function matrixContext(item) {
+  const ids = item.criteria.map(criterion => criterion.id);
+  const target = ids.includes(state.target) ? state.target : ids[0];
+  const localIds = item.method === "anp" ? ids.filter(id => (item.influences[target] || []).includes(id)) : ids;
+  const comparisons = item.method === "anp" ? (item.comparisons.influence[target] || {}) : item.comparisons.base;
+  const list = pairs(localIds);
+  const selected = state.matrixPair && state.matrixPair.target === target
+    ? list.find(([a, b]) => a === state.matrixPair.a && b === state.matrixPair.b) : null;
+  const active = selected || list.find(([a, b]) => pairValue(comparisons, a, b) === null) || list[0];
+  return { ids, target, localIds, comparisons, list, active };
+}
+function allMatrixPairs(item) {
+  const ids = item.criteria.map(criterion => criterion.id);
+  const targets = item.method === "anp" ? ids : [ids[0]];
+  return targets.flatMap(target => {
+    const localIds = item.method === "anp" ? ids.filter(id => (item.influences[target] || []).includes(id)) : ids;
+    const comparisons = item.method === "anp" ? (item.comparisons.influence[target] || {}) : item.comparisons.base;
+    return pairs(localIds).map(([a, b]) => ({ target, a, b, answered: pairValue(comparisons, a, b) !== null }));
+  });
+}
+function nextMatrixGap(item) {
+  const all = allMatrixPairs(item);
+  const index = all.findIndex(pair => state.matrixPair && pair.target === state.matrixPair.target && pair.a === state.matrixPair.a && pair.b === state.matrixPair.b);
+  const pending = [...all.slice(index + 1), ...all.slice(0, index + 1)].find(pair => !pair.answered);
+  if (!pending) { toast("Todos os julgamentos necessários foram preenchidos."); return; }
+  state.target = pending.target;
+  state.matrixPair = { target: pending.target, a: pending.a, b: pending.b };
+  state.fuzzyCustomFor = null;
+  render();
+  document.querySelector("#matrix-editor-title")?.focus({ preventScroll: true });
+}
+function renderJudgmentKeepingFocus(selector) {
+  const scroll = window.scrollY;
+  render();
+  const control = document.querySelector(selector);
+  control?.focus({ preventScroll: true });
+  window.scrollTo(0, scroll);
+}
+function matrixJudgments(item) {
+  const isAnp = item.method === "anp";
+  const { ids, target, localIds, comparisons, list, active } = matrixContext(item);
+  state.target = target;
+  const [a, b] = active || [];
+  state.matrixPair = a ? { target, a, b } : null;
+  const current = a ? pairValue(comparisons, a, b) : null;
+  const progress = comparisonProgress(localIds, comparisons);
+  const all = allMatrixPairs(item);
+  const total = all.length;
+  const completed = all.filter(pair => pair.answered).length;
+  const rawMatrix = comparisonMatrix(localIds, comparisons);
+  const check = rawMatrix && localIds.length > 1 ? consistency(rawMatrix, principalEigenvector(rawMatrix)) : null;
+  const network = isAnp ? networkStatus(ids, item.influences) : { valid: true };
+  const targets = isAnp ? '<section class="card matrix-target-card"><div class="card-head"><div><h3>Matrizes locais do ANP</h3><p>Selecione o critério que recebe as influências. Cada aba corresponde a uma coluna da supermatriz.</p></div><span class="pill">' + completed + '/' + total + ' no total</span></div>' +
+    '<div class="matrix-targets" role="group" aria-label="Critério influenciado">' + ids.map(id => {
+      const incoming = ids.filter(source => (item.influences[id] || []).includes(source));
+      const p = comparisonProgress(incoming, item.comparisons.influence[id] || {});
+      const label = incoming.length <= 1 ? "Sem pares" : p.completed + "/" + p.total;
+      return '<button type="button" class="matrix-target ' + (id === target ? "active" : "") + '" data-action="target" data-id="' + escapeHtml(id) + '" aria-pressed="' + (id === target) + '"><strong>' + escapeHtml(criterionName(item, id)) + '</strong><span>' + label + '</span></button>';
+    }).join("") + '</div>' + (!network.valid ? '<div class="notice warn" style="margin-top:12px">' + escapeHtml(network.reason) + '</div>' : "") + '</section>' : "";
+  const matrix = localIds.length ? '<div class="matrix-scroll" role="region" tabindex="0" aria-label="Matriz de comparações, rolável horizontalmente">' +
+    '<table class="judgment-matrix"><caption>Edite somente as células acima da diagonal; a reciprocidade é automática.</caption><thead><tr><th scope="col">Critério</th>' +
+    localIds.map(id => '<th scope="col">' + escapeHtml(criterionName(item, id)) + '</th>').join("") + '</tr></thead><tbody>' +
+    localIds.map((rowId, i) => '<tr><th scope="row">' + escapeHtml(criterionName(item, rowId)) + '</th>' + localIds.map((columnId, j) => {
+      if (i === j) return '<td class="matrix-diagonal" aria-label="Diagonal igual a 1">1</td>';
+      const value = pairValue(comparisons, rowId, columnId);
+      if (i > j) return '<td class="matrix-reciprocal" aria-label="Valor recíproco calculado">' + (value === null ? '—' : ratioText(value)) + '</td>';
+      const chosen = active && active[0] === rowId && active[1] === columnId;
+      return '<td class="matrix-editable"><button type="button" class="matrix-cell ' + (chosen ? 'active ' : '') + (value === null ? 'missing' : 'filled') + '" data-action="matrix-cell" data-a="' + escapeHtml(rowId) + '" data-b="' + escapeHtml(columnId) + '" data-target="' + escapeHtml(target || '') + '" aria-pressed="' + Boolean(chosen) + '" aria-label="Editar comparação entre ' + escapeHtml(criterionName(item, rowId)) + ' e ' + escapeHtml(criterionName(item, columnId)) + ', ' + (value === null ? 'não respondida' : 'valor ' + ratioText(value)) + '">' + (value === null ? '?' : ratioText(value)) + '</button></td>';
+    }).join('') + '</tr>').join('') + '</tbody></table></div>' : '<p class="muted">Adicione critérios para começar.</p>';
+  const [left, right] = a ? [criterionName(item, a), criterionName(item, b)] : ["", ""];
+  const selectedSide = current === null || closeNumber(current, 1) ? null : current > 1 ? 'left' : 'right';
+  const strength = current === null ? null : Math.round(Math.max(current, 1 / current));
+  const editor = a ? '<section class="card matrix-editor" aria-label="Editar julgamento selecionado"><span class="eyebrow">JULGAMENTO SELECIONADO</span><h3 id="matrix-editor-title" tabindex="-1">' + escapeHtml(left) + ' × ' + escapeHtml(right) + '</h3>' +
+    '<p class="small muted">' + (isAnp ? 'Qual exerce maior influência sobre ' + escapeHtml(criterionName(item, target)) + '?' : 'Qual é mais importante para o objetivo?') + '</p>' +
+    '<div class="matrix-side-buttons" role="group" aria-label="Preferência"><button type="button" data-action="set-side" data-side="left" class="' + (selectedSide === 'left' ? 'selected' : '') + '" aria-pressed="' + (selectedSide === 'left') + '">' + escapeHtml(left) + '</button><button type="button" data-action="set-side" data-side="right" class="' + (selectedSide === 'right' ? 'selected' : '') + '" aria-pressed="' + (selectedSide === 'right') + '">' + escapeHtml(right) + '</button></div>' +
+    '<span class="matrix-helper">Selecione o preferido e a intensidade, ou marque 1 para igual.</span>' +
+    '<div class="matrix-strengths" role="group" aria-label="Intensidade de Saaty">' + [{ value: 1, label: 'Igual importância' }, ...SAATY].map(value => '<button type="button" data-action="set-intensity" data-value="' + value.value + '" class="' + (strength === value.value ? 'selected' : '') + '" aria-pressed="' + (strength === value.value) + '" aria-label="Intensidade ' + value.value + ': ' + escapeHtml(value.label.toLowerCase()) + '"' + (current === null && value.value !== 1 ? ' disabled' : '') + '>' + value.value + '</button>').join('') + '</div>' +
+    '<div class="matrix-judgment-summary" role="status">' + escapeHtml(pairDescription(left, right, current, isAnp)) + '</div>' + fuzzyControl(item, a, b, current, target) +
+    '<button type="button" class="button secondary matrix-next-button" data-action="matrix-next"' + (completed >= total ? ' disabled' : '') + '>Próximo pendente ' + icon('arrow') + '</button></section>' :
+    '<section class="card matrix-editor"><h3>Nenhuma comparação necessária</h3><p class="muted">' + (localIds.length === 1 ? 'Um único critério influencia este elemento: peso local igual a 100%.' : isAnp ? 'Defina as influências deste critério no modelo para gerar comparações.' : 'Adicione pelo menos dois critérios na etapa Modelo.') + '</p>' +
+    (completed < total ? '<button type="button" class="button secondary" data-action="matrix-next">Próximo conjunto ' + icon('arrow') + '</button>' : '') + '</section>';
+  const consistencyMessage = check ? (check.available ? 'CR = ' + pct(check.cr, 1) + '. ' + (check.acceptable ? 'Dentro do limite usual de 10%.' : 'Revise as preferências nesta matriz.') : 'Consistência indisponível acima de 10 critérios.') :
+    (progress.total ? 'Complete as comparações desta matriz para calcular a razão de consistência.' : 'Sem comparações necessárias neste conjunto.');
+  const side = '<aside class="stack judgment-aside matrix-aside">' + editor + '<section class="card matrix-consistency"><h3>Consistência local</h3><div class="notice ' + (check && check.available && !check.acceptable ? 'warn' : '') + '">' + consistencyMessage + '</div>' +
+    '<details class="matrix-scale-help"><summary>Consultar escala de Saaty</summary><p>1: igual · 3: moderada · 5: forte · 7: muito forte · 9: extrema. Valores pares são intermediários.</p></details></section></aside>';
+  return pageHead(item, 'ETAPA 03 DE 05 · JULGAMENTOS', isAnp ? 'Compare influências' : 'Compare prioridades', 'Preencha a matriz na ordem que preferir. Os valores recíprocos são calculados automaticamente.') + judgmentModeSwitch() +
+    '<div class="workspace-grid matrix-workspace"><div class="stack">' + targets + '<section class="card matrix-main"><div class="card-head"><div><h3>' + (isAnp ? 'Influências sobre ' + escapeHtml(criterionName(item, target)) : 'Matriz de comparação dos critérios') + '</h3><p>Clique em ? ou em um valor da metade superior para editar.</p></div><span class="pill">' + progress.completed + '/' + progress.total + '</span></div>' +
+    '<div class="progress-line"><span>' + (isAnp ? 'Progresso desta matriz' : 'Julgamentos respondidos') + '</span><strong>' + pct(progress.total ? progress.completed / progress.total : 1) + '</strong></div><div class="progress"><span style="width:' + pct(progress.total ? progress.completed / progress.total : 1) + '"></span></div>' +
+    matrix + '<p class="matrix-legend"><span class="matrix-legend-edit">●</span> Editável <span class="matrix-legend-auto">●</span> Recíproco automático <span class="matrix-legend-empty">●</span> Pendente</p>' +
+    '<div class="matrix-bottom-progress"><strong>' + completed + '/' + total + ' julgamentos concluídos</strong><span>' + (total === completed ? 'Todas as comparações registradas.' : (total - completed) + ' comparação(ões) pendente(s).') + '</span></div></section></div>' + side + '</div>';
+}
+
 function guidedJudgments(item) {
   const isAnp = item.method === "anp";
   const ids = item.criteria.map(c => c.id);
@@ -497,7 +625,7 @@ function guidedJudgments(item) {
     const answered = pairValue(comparisons, x, y) !== null;
     return '<button class="review-pair ' + (index === state.judgmentIndex ? "active" : "") + '" data-action="judgment-jump" data-index="' + index + '"><span class="' + (answered ? "review-dot done" : "review-dot") + '"></span>' + escapeHtml(criterionName(item, x)) + ' × ' + escapeHtml(criterionName(item, y)) + '</button>';
   }).join("") + '</div>' + matrixTable(currentIds, matrix, item) + '</details>' : "";
-  return pageHead(item, "ETAPA 03 DE 05 · JULGAMENTOS", isAnp ? "Compare influências" : "Compare prioridades", "Uma pergunta por vez, com a escala de Saaty sempre à vista.") +
+  return pageHead(item, "ETAPA 03 DE 05 · JULGAMENTOS", isAnp ? "Compare influências" : "Compare prioridades", "Uma pergunta por vez, com a escala de Saaty sempre à vista.") + judgmentModeSwitch() +
     '<div class="workspace-grid"><div class="stack">' + targets + question + review + '</div>' + saatyGuide(current, check, isAnp) + '</div>';
 }
 function evaluations(item) {
@@ -594,13 +722,16 @@ function reportHtml(item) {
 function render() {
   const item = project();
   if (!item) { state.projectId = null; state.view = "home"; state.reportOpen = false; root.innerHTML = shell(home()); return; }
-  const views = { overview, structure, judgments: guidedJudgments, evaluations, results };
+  const views = { overview, structure, judgments: state.judgmentMode === "matrix" ? matrixJudgments : guidedJudgments, evaluations, results };
   if (!views[state.view]) state.view = "overview";
   if (state.view !== "results") state.reportOpen = false;
   root.innerHTML = shell(views[state.view](item) + (state.reportOpen && state.view === "results" && analyses(item).ranking ? reportModal(item) : ""));
+  requestAnimationFrame(syncStageDock);
   if (state.view === "structure" && item.method === "anp") requestAnimationFrame(drawNetworkEdges);
 }
 window.addEventListener("resize", drawNetworkEdges);
+window.addEventListener("scroll", syncStageDock, { passive: true });
+window.addEventListener("resize", syncStageDock);
 function download(filename, contents, type) {
   const blob = new Blob([contents], { type });
   const url = URL.createObjectURL(blob);
@@ -657,7 +788,9 @@ root.addEventListener("change", event => {
     try {
       setFuzzyPairValue(fuzzyStore, context.a, context.b, changed);
       state.fuzzyCustomFor = (item.method === "anp" ? context.target + ":" : "") + pairKey(context.a, context.b);
-      save(); render();
+      save();
+      if (state.judgmentMode === "matrix") renderJudgmentKeepingFocus('[data-fuzzy-bound="' + bound + '"]');
+      else render();
     } catch (error) { toast(error.message); render(); }
     return;
   }
@@ -741,7 +874,8 @@ function activeJudgment(item) {
   const currentIds = item.method === "anp" ? ids.filter(id => (item.influences[target] || []).includes(id)) : ids;
   const comparisons = item.method === "anp" ? (item.comparisons.influence[target] ||= {}) : item.comparisons.base;
   const list = pairs(currentIds);
-  const [a, b] = list[state.judgmentIndex] || [];
+  const selected = state.judgmentMode === "matrix" ? matrixContext(item).active : list[state.judgmentIndex];
+  const [a, b] = selected || [];
   return { ids, target, currentIds, comparisons, list, a, b, current: a ? pairValue(comparisons, a, b) : null };
 }
 function nextJudgment(item) {
@@ -806,7 +940,35 @@ root.addEventListener("click", event => {
     save(); render(); toast("Análise excluída.");
   }
   else if (action === "view") { state.view = button.dataset.view; render(); window.scrollTo(0, 0); }
-  else if (action === "target") { state.target = button.dataset.id; state.judgmentIndex = 0; state.fuzzyCustomFor = null; render(); }
+  else if (action === "judgment-mode" && item) {
+    const mode = button.dataset.mode;
+    if (mode !== "guided" && mode !== "matrix") return;
+    if (mode === "matrix" && state.judgmentMode !== "matrix") {
+      const context = activeJudgment(item);
+      state.matrixPair = context.a ? { target: context.target, a: context.a, b: context.b } : null;
+    }
+    if (mode === "guided" && state.judgmentMode !== "guided") {
+      const context = matrixContext(item);
+      const index = context.list.findIndex(([a, b]) => context.active && a === context.active[0] && b === context.active[1]);
+      state.judgmentIndex = Math.max(0, index);
+    }
+    state.judgmentMode = mode;
+    try { localStorage.setItem("decisionlab.judgmentMode", mode); } catch { /* navegador bloqueia armazenamento */ }
+    render();
+  }
+  else if (action === "matrix-cell" && item) {
+    state.target = button.dataset.target;
+    state.matrixPair = { target: state.target, a: button.dataset.a, b: button.dataset.b };
+    state.fuzzyCustomFor = null;
+    const scroll = window.scrollY;
+    render();
+    document.querySelector("#matrix-editor-title")?.focus({ preventScroll: true });
+    if (window.matchMedia("(max-width: 760px)").matches) {
+      document.querySelector(".matrix-editor")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    } else window.scrollTo(0, scroll);
+  }
+  else if (action === "matrix-next" && item) nextMatrixGap(item);
+  else if (action === "target") { state.target = button.dataset.id; state.judgmentIndex = 0; state.matrixPair = null; state.fuzzyCustomFor = null; render(); }
   else if (action === "focus-add-criterion") { document.querySelector("#new-criterion")?.focus(); document.querySelector("#new-criterion")?.scrollIntoView({ block: "center", behavior: "smooth" }); }
   else if (action === "edit-alternative") {
     const input = [...document.querySelectorAll('[data-field="alternative-name"]')].find(element => element.dataset.id === button.dataset.id);
@@ -829,7 +991,12 @@ root.addEventListener("click", event => {
       const fuzzyStore = item.method === "anp" ? item.comparisons.fuzzyInfluence?.[context.target] : item.comparisons.fuzzyBase;
       if (fuzzyStore) delete fuzzyStore[pairKey(context.a, context.b)];
     }
-    state.fuzzyCustomFor = null; save(); render();
+    state.fuzzyCustomFor = null; save();
+    if (state.judgmentMode === "matrix") {
+      const selector = action === "set-side" ? '[data-action="set-side"][data-side="' + button.dataset.side + '"]'
+        : '[data-action="set-intensity"][data-value="' + button.dataset.value + '"]';
+      renderJudgmentKeepingFocus(selector);
+    } else render();
   }
   else if (action === "judgment-prev") { state.judgmentIndex = Math.max(0, state.judgmentIndex - 1); state.fuzzyCustomFor = null; render(); }
   else if (action === "judgment-next" && item) nextJudgment(item);
@@ -852,9 +1019,11 @@ root.addEventListener("click", event => {
         setFuzzyPairValue(fuzzyStore, context.a, context.b, approximateTriangle(context.current));
       state.fuzzyCustomFor = stateKey;
     }
-    save(); render();
+    save();
+    if (state.judgmentMode === "matrix") renderJudgmentKeepingFocus('[data-action="fuzzy-mode"][data-mode="' + button.dataset.mode + '"]');
+    else render();
   }
-  else if (action === "method" && item) { item.method = button.dataset.method; state.target = item.criteria[0]?.id || null; save(); render(); }
+  else if (action === "method" && item) { item.method = button.dataset.method; state.target = item.criteria[0]?.id || null; state.matrixPair = null; state.judgmentIndex = 0; save(); render(); }
   else if (action === "evaluation-mode" && item) { item.evaluationMode = button.dataset.mode; save(); render(); }
   else if (action === "add-criterion") addEntity("criterion");
   else if (action === "add-alternative") addEntity("alternative");
