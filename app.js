@@ -150,6 +150,11 @@ function demoProject(exampleKey = EXAMPLES[0].key) {
   return item;
 }
 function selectProject(id, view = "overview") {
+  const selected = state.projects.find(item => item.id === id);
+  if (!selected?.guided || !EXAMPLES.some(example => example.key === selected.exampleKey)) {
+    state.projectId = null; state.view = "home"; render(); return;
+  }
+  normalizeExample(selected);
   state.projectId = id;
   state.view = view;
   state.target = project()?.criteria[0]?.id || null;
@@ -193,25 +198,8 @@ function analyses(item) {
 }
 // Ações contextuais aparecem quando o cabeçalho da etapa sai da área visível.
 const STEP_VIEWS = ["overview", "structure", "judgments", "evaluations", "results"];
-function stageDock(item) {
-  const index = STEP_VIEWS.indexOf(state.view);
-  if (!item || index < 0 || index >= STEP_VIEWS.length - 1 || state.reportOpen) return "";
-  const names = ["Problema", "Modelo", "Julgamentos", "Desempenho", "Interpretação"];
-  const next = ["Montar o modelo", "Abrir julgamentos", "Avaliar alternativas", "Ver interpretação"];
-  return '<nav class="stage-dock" aria-label="Ações da etapa" aria-hidden="true" inert>' +
-    '<div class="stage-dock-info"><span>ETAPA ' + String(index + 1).padStart(2, '0') + ' DE 05</span><strong>' + names[index] + '</strong></div>' +
-    '<div class="stage-dock-buttons">' + (index > 0 ? '<button type="button" class="button secondary" data-action="view" data-view="' + STEP_VIEWS[index - 1] + '">' + icon('back') + ' Voltar</button>' : '') +
-    '<button type="button" class="button" data-action="view" data-view="' + STEP_VIEWS[index + 1] + '">' + next[index] + ' ' + icon('arrow') + '</button></div></nav>';
-}
-function syncStageDock() {
-  const dock = document.querySelector('.stage-dock');
-  if (!dock) return;
-  const heading = document.querySelector('.workspace-head');
-  const visible = Boolean(heading && heading.getBoundingClientRect().bottom < 0);
-  dock.classList.toggle('is-visible', visible);
-  dock.setAttribute('aria-hidden', String(!visible));
-  dock.inert = !visible;
-}
+
+
 
 function shell(content) {
   const item = project();
@@ -225,42 +213,44 @@ function shell(content) {
   const activeStage = nav.findIndex(([view]) => view === state.view);
   const analysis = item ? analyses(item) : null;
   const stageDone = item ? [Boolean(item.objective.trim()), item.criteria.length >= 2 && item.alternatives.length >= 2 && (item.method !== "anp" || networkStatus(item.criteria.map(c => c.id), item.influences).valid), analysis.model.ready, analysis.evaluation.ready, Boolean(analysis.ranking)] : [];
-  return '<div class="app' + (item ? " analysis-shell" : "") + '"><aside class="sidebar">' +
+  return '<div class="app' + (item ? " analysis-shell" + (item.guided ? " guided-preview" : "") : "") + '"><aside class="sidebar">' +
     '<a class="brand" href="#" data-action="home" aria-label="DecisionLab, voltar ao painel"><span class="brand-name">decision<span>lab</span></span><span class="brand-dot" aria-hidden="true"></span></a>' +
     '<div class="journey-body">' + (item ? '<div class="journey-heading"><span class="nav-label">SEU PERCURSO</span><h2>Uma decisão<br>em 5 etapas.</h2><p>Avance e volte sempre que precisar.</p></div><button class="mobile-stage-toggle" type="button" data-action="toggle-nav" aria-expanded="false">Etapa ' + (activeStage + 1) + ' de 5 · ' + nav[activeStage][2] + ' <span>Ver etapas ⌄</span></button>' : '<div class="nav-label">NAVEGAÇÃO</div>') + '<nav class="side-nav" aria-label="Etapas da análise">' +
     nav.map(([view, symbol, name, subtitle], index) => '<button type="button" class="nav-item ' + (state.view === view ? "active" : "") + '" data-action="view" data-view="' + view + '"' + (state.view === view ? ' aria-current="step"' : "") + '>' + (item ? '<b class="nav-number">' + String(index + 1).padStart(2, "0") + '</b><span class="nav-copy"><strong>' + name + '</strong><small>' + subtitle + '</small></span><i aria-hidden="true">' + (index === activeStage ? "●" : stageDone[index] ? "✓" : "○") + '</i>' : icon(symbol) + '<span>' + name + '</span>') + '</button>').join("") +
-    (item ? "" : '<button type="button" class="nav-item" data-action="new">' + icon("plus") + '<span>Nova análise</span></button>') +
+    (item ? "" : "") +
     '</nav></div><div class="sidebar-bottom">' + (item ? '<button class="back-to-projects" type="button" data-action="home">← Todas as análises</button><p>' + (item.guided ? "Exemplo guiado. A pergunta deste caso é fixa; você pode experimentar julgamentos e desempenhos." : "Sua análise é salva neste navegador. Exporte um JSON para guardar uma cópia.") + '</p>' : "Seus projetos ficam neste navegador. Exporte um JSON para guardar uma cópia.") + '</div></aside>' +
     '<main class="main"><header class="topbar"><div class="topbar-left"><span class="crumb">' + (item ? "MINHAS ANÁLISES /" : "PLATAFORMA /") + '</span><span class="topbar-title">' + escapeHtml(item ? item.title : "Visão geral") + '</span></div><div class="topbar-right"><span class="saved">' + (item ? "● Salvo neste navegador" : "AHP · ANP") + '</span>' +
-    (item ? '<button class="button secondary small-btn" data-action="export-json">' + icon("download") + ' Exportar</button>' : '<button class="button secondary small-btn" data-action="import">' + icon("upload") + ' Importar</button>') +
-    '</div></header><div class="page' + (state.reportOpen ? ' report-active' : '') + '">' + content + '</div>' + stageDock(item) + '</main></div><input id="import-file" type="file" accept="application/json,.json" hidden>';
+    (item ? '<button class="button secondary small-btn" data-action="export-json">' + icon("download") + ' Exportar</button>' : '<span class="preview-status">Prévia didática</span>') +
+    '</div></header><div class="page' + (state.reportOpen ? ' report-active' : '') + '">' + content + '</div></main></div><input id="import-file" type="file" accept="application/json,.json" hidden>';
 }
 function home() {
-  const recent = [...state.projects].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 4);
   const exampleStatus = example => {
     const saved = state.projects.filter(item => item.guided && item.exampleKey === example.key);
     return { unfinished: [...saved].reverse().find(item => !analyses(item).ranking), hasSaved: saved.length > 0 };
   };
-  const phoneStatus = exampleStatus(EXAMPLES[0]);
-  const phoneLabel = phoneStatus.unfinished ? "Continuar exemplo do celular" : phoneStatus.hasSaved ? "Refazer exemplo do celular" : "Começar exemplo do celular";
-  return '<section class="hero"><div class="hero-copy"><span class="eyebrow">UM ESTÚDIO PARA APRENDER DECIDINDO</span><h1>Qual celular comprar?</h1><p>Comece com um caso pronto para entender o percurso: veja o modelo, julgue os critérios, compare os celulares e interprete o resultado. Depois, crie sua análise do zero.</p><div class="button-row"><button class="button" data-action="example" data-example="celular-universitario-v1">' + icon("sparkle") + ' ' + phoneLabel + '</button><button class="button secondary" data-action="new">' + icon("plus") + ' Criar do zero</button></div></div><div class="hero-art" aria-hidden="true"><div class="hero-card hero-card-a"><span>CRITÉRIO A</span><strong>Preço</strong><small>Quanto pesa?</small></div><div class="hero-card hero-card-b"><span>CRITÉRIO B</span><strong>Bateria</strong><small>Compare e descubra.</small></div><div class="hero-connector">×</div></div></section>' +
-    '<div class="section-head example-section-head"><div><span class="eyebrow">CASOS PARA EXPLORAR</span><h2>Escolha um exemplo pronto</h2><p>Os dados estão preenchidos. Você faz os julgamentos, pode experimentar o fuzzy e vê como o resultado muda.</p></div></div>' +
+  const primary = EXAMPLES[0];
+  const phoneStatus = exampleStatus(primary);
+  const phoneLabel = phoneStatus.unfinished ? "Continuar o exemplo" : phoneStatus.hasSaved ? "Refazer o exemplo" : "Começar o exemplo";
+  return '<section class="hero"><div class="hero-copy"><span class="eyebrow">VERSÃO DIDÁTICA · EM DESENVOLVIMENTO</span><h1>Aprenda a decidir, um exemplo de cada vez.</h1>' +
+    '<p>Explore três demonstrações interativas de AHP e ANP. Cada caso já vem com três critérios e três alternativas. Por enquanto, o DecisionLab funciona apenas com exemplos guiados; a criação de análises próprias está em desenvolvimento.</p>' +
+    '<div class="button-row"><button class="button" data-action="example" data-example="' + escapeHtml(primary.key) + '">' + icon("sparkle") + ' ' + phoneLabel + '</button><a class="button secondary preview-examples-link" href="#exemplos">Ver os três exemplos</a></div></div>' +
+    '<div class="hero-art" aria-hidden="true"><div class="hero-card hero-card-a"><span>CRITÉRIO A</span><strong>Preço</strong><small>Quanto pesa?</small></div><div class="hero-card hero-card-b"><span>CRITÉRIO B</span><strong>Bateria</strong><small>Compare e descubra.</small></div><div class="hero-connector">×</div></div></section>' +
+    '<section class="preview-notice" role="note"><strong>Protótipo em desenvolvimento</strong><span>Disponíveis agora: 3 casos didáticos, com 3 critérios e 3 alternativas cada. Novos modelos e análises personalizadas serão disponibilizados em futuras versões.</span></section>' +
+    '<div id="exemplos" class="section-head example-section-head"><div><span class="eyebrow">TRÊS CASOS PARA EXPLORAR</span><h2>Escolha um exemplo guiado</h2><p>Você escolhe quais critérios são mais importantes. Os dados dos exemplos já estão definidos e não podem ser alterados.</p></div></div>' +
     '<div class="example-grid">' + EXAMPLES.map(example => {
       const status = exampleStatus(example);
-      const label = status.unfinished ? "Continuar caso" : status.hasSaved ? "Refazer caso" : "Explorar caso";
-      return '<article class="example-card"><div class="example-card-top"><span class="eyebrow">' + escapeHtml(example.category) + '</span><span class="example-method">' + example.method.toUpperCase() + '</span></div><h3>' + escapeHtml(example.title) + '</h3><p>' + escapeHtml(example.description) + '</p><div class="example-criteria" aria-label="Critérios do exemplo">' + example.criteria.map(criterion => '<span>' + escapeHtml(criterion.name) + '</span>').join("") + '</div><div class="example-card-bottom"><small>3 opções · 3 critérios</small><button type="button" class="example-link" data-action="example" data-example="' + escapeHtml(example.key) + '">' + label + ' <span aria-hidden="true">→</span></button></div></article>';
+      const label = status.unfinished ? "Continuar exemplo" : status.hasSaved ? "Refazer exemplo" : "Explorar exemplo";
+      return '<article class="example-card"><div class="example-card-top"><span class="eyebrow">' + escapeHtml(example.category) + '</span><span class="example-method">' + example.method.toUpperCase() + '</span></div><h3>' + escapeHtml(example.title) + '</h3><p>' + escapeHtml(example.description) + '</p><div class="example-criteria" aria-label="Critérios do exemplo">' + example.criteria.map(criterion => '<span>' + escapeHtml(criterion.name) + '</span>').join("") + '</div><div class="example-card-bottom"><small>3 alternativas · 3 critérios</small><button type="button" class="example-link" data-action="example" data-example="' + escapeHtml(example.key) + '">' + label + ' <span aria-hidden="true">→</span></button></div></article>';
     }).join("") + '</div>' +
-    '<div class="section-head"><div><span class="eyebrow">CONTINUE DE ONDE PAROU</span><h2>Suas análises</h2></div><button class="button ghost" data-action="new">Nova análise ' + icon("arrow") + '</button></div>' +
-    (recent.length ? '<div class="grid two">' + recent.map(item => {
-      const status = analyses(item);
-      return '<article class="card project-card"><span class="project-symbol">' + icon(item.method === "anp" ? "nodes" : "chart") + '</span><div class="project-card-body"><h3>' + escapeHtml(item.title) + '</h3><p>' + (item.guided ? "Exemplo guiado · " : "") + methodName(item) + ' · Atualizada em ' + date(item.updatedAt) + (status.ranking ? ' · ' + status.ranking.length + ' alternativas' : '') + '</p></div><div class="project-actions"><button class="button secondary small-btn" data-action="open" data-id="' + escapeHtml(item.id) + '">Abrir ' + icon("arrow") + '</button><button class="icon-button" title="Duplicar análise" aria-label="Duplicar ' + escapeHtml(item.title) + '" data-action="duplicate" data-id="' + escapeHtml(item.id) + '">' + icon("copy") + '</button><button class="icon-button" title="Excluir análise" aria-label="Excluir ' + escapeHtml(item.title) + '" data-action="delete" data-id="' + escapeHtml(item.id) + '">' + icon("trash") + '</button></div></article>';
-    }).join("") + '</div>' : '<div class="card empty">' + icon("grid") + '<strong>Seu espaço de trabalho está pronto.</strong><p>Crie uma análise ou explore um exemplo preenchido para conhecer a plataforma.</p></div>') +
-    '<div class="section-head"><div><span class="eyebrow">ESCOLHA A ESTRUTURA</span><h2>Dois caminhos para modelar</h2></div></div>' +
-    '<div class="grid two"><article class="card method-card"><span class="method-icon">' + icon("chart") + '</span><h3>AHP + desempenho</h3><p>Compare critérios com julgamentos exatos ou fuzzy e combine os pesos com o desempenho das alternativas.</p></article><article class="card method-card"><span class="method-icon">' + icon("nodes") + '</span><h3>ANP em rede</h3><p>Modele influências entre critérios, compare cada conjunto local com valores exatos ou fuzzy e calcule prioridades pela supermatriz limite.</p></article></div>' +
-    '<p class="footer-note">DecisionLab 2.0 · Plataforma local para análise multicritério. Os dados permanecem no seu navegador.</p>';
+    '<div class="section-head"><div><span class="eyebrow">ENTENDA OS MÉTODOS</span><h2>Conheça dois métodos de decisão</h2></div></div>' +
+    '<div class="grid two"><article class="card method-card"><span class="method-icon">' + icon("chart") + '</span><h3>AHP + desempenho</h3><p>Compare a importância dos critérios usando a escala de 1 a 9. Veja como os pesos afetam o resultado.</p></article><article class="card method-card"><span class="method-icon">' + icon("nodes") + '</span><h3>ANP em rede</h3><p>Veja como os critérios influenciam uns aos outros, responda às comparações e interprete o resultado.</p></article></div>' +
+    '<p class="footer-note">DecisionLab · Prévia didática em desenvolvimento. Suas respostas são salvas somente neste navegador.</p>';
 }
+
+
 function pageHead(item, eyebrow, title, description, actions = "") {
-  return '<div class="workspace-head"><div><span class="eyebrow">' + eyebrow + '</span><h1>' + title + '</h1><p>' + description + '</p></div><div class="button-row no-print">' + actions + '</div></div>';
+  state.pageActions = actions;
+  return '<div class="workspace-head"><div><span class="eyebrow">' + eyebrow + '</span><h1>' + title + '</h1><p>' + description + '</p></div></div>';
 }
 function statusSide(item, analysis) {
   const judgments = item.method === "ahp" ? comparisonProgress(item.criteria.map(c => c.id), item.comparisons.base) :
@@ -283,11 +273,11 @@ function statusSide(item, analysis) {
 function overview(item) {
   const analysis = analyses(item);
   const context = item.guided
-    ? '<div class="guided-objective"><span class="eyebrow">PERGUNTA DESTE EXEMPLO</span><h3>' + escapeHtml(item.title) + '</h3><p>' + escapeHtml(item.objective) + '</p><small>Este objetivo é fixo para manter o exemplo coerente. Ao concluir, você poderá criar sua própria análise do zero.</small></div><div class="phone-options">' + item.alternatives.map(a => '<span>' + escapeHtml(a.name) + '</span>').join("") + '</div>'
+    ? '<div class="guided-objective"><span class="eyebrow">PERGUNTA DESTE EXEMPLO</span><h3>' + escapeHtml(item.title) + '</h3><p>' + escapeHtml(item.objective) + '</p><small>Este objetivo é fixo para manter o exemplo coerente. Você poderá explorar outros exemplos; análises personalizadas estão em desenvolvimento.</small></div><div class="phone-options">' + item.alternatives.map(a => '<span>' + escapeHtml(a.name) + '</span>').join("") + '</div>'
     : '<label class="field"><span class="label">Nome da análise</span><input class="input" data-field="title" maxlength="100" value="' + escapeHtml(item.title) + '"></label><label class="field"><span class="label">Objetivo da decisão</span><textarea class="textarea" data-field="objective" placeholder="Ex.: escolher um celular equilibrando preço, bateria e câmera.">' + escapeHtml(item.objective) + '</textarea><span class="field-hint">Descreva a escolha em uma frase. Ela aparecerá no relatório.</span></label>';
   return pageHead(item, "ETAPA 01 DE 05 · PROBLEMA", item.guided ? "Comece pela pergunta." : "Defina a decisão", item.guided ? "Neste exemplo, você vai comparar três opções fictícias com critérios e dados já preparados." : "Formule o problema. Você criará os critérios e as alternativas na etapa seguinte.", '<button class="button" data-action="view" data-view="structure">Montar o modelo ' + icon("arrow") + '</button>') +
     '<div class="workspace-grid"><div class="stack"><section class="card"><div class="card-head"><div><h3>' + (item.guided ? "O caso que vamos estudar" : "Contexto da análise") + '</h3><p>' + (item.guided ? "Observe as opções antes de comparar os critérios." : "Registre o que precisa ser decidido e por quê.") + '</p></div><span class="pill">01 / CONTEXTO</span></div>' + context + '</section>' +
-    '<section class="card"><div class="card-head"><div><h3>Como os critérios se relacionam?</h3><p>Escolha a estrutura que representa seu problema.</p></div><span class="pill">02 / MODELO</span></div><div class="method-choice">' +
+    '<section class="card"><div class="card-head"><div><h3>Método utilizado neste exemplo</h3><p>Escolha a estrutura que representa seu problema.</p></div><span class="pill">02 / MODELO</span></div><div class="method-choice">' +
     '<button class="choice ' + (item.method === "ahp" ? "active" : "") + '" data-action="method" data-method="ahp"><strong>AHP + desempenho</strong><span>Compare a importância dos critérios. Você pode indicar incerteza fuzzy em cada resposta.</span></button>' +
     '<button class="choice ' + (item.method === "anp" ? "active" : "") + '" data-action="method" data-method="anp"><strong>ANP em rede</strong><span>Modele influências entre critérios. As comparações locais também aceitam incerteza fuzzy.</span></button></div><p class="field-hint" style="margin:13px 0 0">Ao mudar o método, os julgamentos de cada modelo permanecem guardados separadamente.</p></section>' +
     '<div class="helper"><strong>Sobre o escopo do ANP:</strong> esta versão trabalha com uma rede de um grupo de critérios. As alternativas são pontuadas após o cálculo dos pesos. O resultado explicita essa combinação no relatório.</div></div>' + statusSide(item, analysis) + '</div>';
@@ -475,7 +465,7 @@ function saatyGuide(current, check, isAnp) {
   return '<aside class="stack judgment-aside"><section class="card scale-guide"><span class="eyebrow">CONSULTA RÁPIDA</span><h3>Escala de Saaty</h3><p class="small muted">A intensidade vale para o critério escolhido. Os valores pares são intermediários.</p><div class="scale-list">' +
     rows.map(row => '<div class="scale-row ' + (strength !== null && closeNumber(strength, row.value) ? "active" : "") + '"><b>' + row.value + '</b><span>' + row.label + '</span></div>').join("") +
     '</div><p class="field-hint" style="margin:13px 0 0">A comparação inversa é registrada automaticamente.</p></section>' +
-    '<section class="card"><h3>Consistência</h3><p class="small muted">A razão de consistência é calculada quando a matriz está completa.' + (isAnp ? " Cada conjunto de influência é verificado separadamente." : " No AHP fuzzy, ela considera os valores centrais.") + '</p>' +
+    '<section class="card"><h3>Consistência</h3><p class="small muted">A razão de consistência é calculada quando a matriz está completa.' + (isAnp ? " Cada conjunto de influência é verificado separadamente." : " No AHP, ela ajuda a verificar a coerência entre as comparações.") + '</p>' +
     (check ? '<div class="notice ' + (check.acceptable ? "" : "warn") + '">CR: <strong>' + (check.available ? pct(check.cr, 1) : "indisponível") + '</strong>. ' + (check.available ? (check.acceptable ? "Dentro do limite de 10%." : "Revise os julgamentos.") : "Há mais de 10 elementos.") + '</div>' :
       '<div class="notice">Complete o conjunto para verificar a consistência.</div>') + '</section></aside>';
 }
@@ -616,16 +606,16 @@ function guidedJudgments(item) {
     question = '<section class="card guided-card"><div class="card-head"><div><span class="eyebrow">JULGAMENTO ' + (state.judgmentIndex + 1) + ' DE ' + list.length + '</span><h2 style="margin:9px 0 5px">' + (isAnp ? "Qual critério influencia mais?" : "Qual critério pesa mais?") + '</h2><p>' + (isAnp ? "Comparação de influência sobre " + escapeHtml(criterionName(item, target)) + "." : "Considere o objetivo: " + escapeHtml((item.objective || item.title).trim().replace(/[.!?]$/, "")) + ".") + '</p></div></div>' +
       '<div class="progress-line"><span>' + progress.completed + ' de ' + progress.total + ' respondidos</span><strong>' + pct(progress.total ? progress.completed / progress.total : 1) + '</strong></div><div class="progress"><span style="width:' + pct(progress.total ? progress.completed / progress.total : 1) + '"></span></div>' +
       '<div class="studio-arena" role="group" aria-label="Escolha o critério com maior ' + (isAnp ? "influência" : "importância") + '"><button class="studio-criterion studio-left ' + (selectedSide === "left" ? "selected" : "") + '" data-action="set-side" data-side="left" aria-pressed="' + (selectedSide === "left") + '"><span>CRITÉRIO A</span><strong>' + escapeHtml(left) + '</strong><small>' + (selectedSide === "left" ? "Selecionado" : "Escolher") + '</small></button><span class="studio-versus">OU</span><button class="studio-criterion studio-right ' + (selectedSide === "right" ? "selected" : "") + '" data-action="set-side" data-side="right" aria-pressed="' + (selectedSide === "right") + '"><span>CRITÉRIO B</span><strong>' + escapeHtml(right) + '</strong><small>' + (selectedSide === "right" ? "Selecionado" : "Escolher") + '</small></button></div>' +
-      '<div class="studio-intensity"><div><h3>Quão forte é essa preferência?</h3><p>' + (current === null ? "Escolha um critério ou marque 1 para igual" : "1 = igual · 9 = extrema") + '</p></div><div class="studio-strengths" role="group" aria-label="Intensidade na escala de Saaty">' + strengthButtons + '</div></div>' +
+      '<div class="studio-intensity"><div><h3>Qual é a intensidade da sua escolha?</h3><p>' + (current === null ? "Escolha um critério ou marque 1 para igual" : "1 = igual · 9 = extrema") + '</p></div><div class="studio-strengths" role="group" aria-label="Intensidade na escala de Saaty">' + strengthButtons + '</div></div>' +
       '<div class="judgment-feedback ' + (current === null ? "empty-feedback" : "") + '">' + icon(current === null ? "info" : "check") + '<span>' + escapeHtml(pairDescription(left, right, current, isAnp)) + '</span></div>' +
-      fuzzyControl(item, a, b, current, target) +
+      '<p class="preview-saaty-hint">1 = igualdade · 3 = moderada · 5 = forte · 7 = muito forte · 9 = extrema. Os números pares são intermediários.</p>' +
       '<div class="judgment-nav"><button class="button secondary" data-action="judgment-prev"' + (state.judgmentIndex === 0 ? " disabled" : "") + '>' + icon("back") + ' Anterior</button><button class="button" data-action="judgment-next"' + (current === null ? " disabled" : "") + '>Confirmar e próximo ' + icon("arrow") + '</button></div></section>';
   }
   const review = list.length ? '<details class="card review-card"><summary>Revisar todos os pares <span>' + progress.completed + '/' + progress.total + '</span></summary><div class="review-pairs">' + list.map(([x, y], index) => {
     const answered = pairValue(comparisons, x, y) !== null;
     return '<button class="review-pair ' + (index === state.judgmentIndex ? "active" : "") + '" data-action="judgment-jump" data-index="' + index + '"><span class="' + (answered ? "review-dot done" : "review-dot") + '"></span>' + escapeHtml(criterionName(item, x)) + ' × ' + escapeHtml(criterionName(item, y)) + '</button>';
-  }).join("") + '</div>' + matrixTable(currentIds, matrix, item) + '</details>' : "";
-  return pageHead(item, "ETAPA 03 DE 05 · JULGAMENTOS", isAnp ? "Compare influências" : "Compare prioridades", "Uma pergunta por vez, com a escala de Saaty sempre à vista.") + judgmentModeSwitch() +
+  }).join("") + '</div>' + '</details>' : "";
+  return pageHead(item, "ETAPA 03 DE 05 · JULGAMENTOS", isAnp ? "Compare influências" : "Compare prioridades", "Uma pergunta por vez, com a escala de Saaty sempre à vista.") +
     '<div class="workspace-grid"><div class="stack">' + targets + question + review + '</div>' + saatyGuide(current, check, isAnp) + '</div>';
 }
 function evaluations(item) {
@@ -677,7 +667,7 @@ function results(item) {
   const gap = ranking.length > 1 ? ranking[0].score - ranking[1].score : 0;
   const sensitivityRows = sensitivity(item, model.weights, analysis.normalized);
   const method = item.method === "anp" ? (model.local.some(group => group.fuzzy) ? "ANP com prioridades locais fuzzy defuzzificadas + pontuação aditiva" : "ANP de um grupo de critérios + pontuação aditiva") : model.fuzzy ? "AHP fuzzy por média geométrica triangular, centroide normalizado + pontuação aditiva" : "Pesos AHP por autovetor + pontuação aditiva";
-  const nextStep = item.guided ? '<section class="guided-finish"><div><span class="eyebrow">EXEMPLO CONCLUÍDO</span><h2>Agora monte uma decisão sua.</h2><p>Comece com objetivo, critérios e alternativas vazios. Você escolhe o método e preenche cada julgamento e dado de desempenho.</p></div><button class="button" data-action="new">Criar minha análise do zero ' + icon("arrow") + '</button></section>' : "";
+  const nextStep = item.guided ? '<section class="guided-finish"><div><span class="eyebrow">EXEMPLO CONCLUÍDO</span><h2>Explore outro exemplo.</h2><p>O DecisionLab está em desenvolvimento. Por enquanto, você pode comparar os três casos didáticos e revisar os seus julgamentos.</p></div><button class="button" data-action="home">Ver os três exemplos ' + icon("arrow") + '</button></section>' : "";
   const details = item.method === "anp" ?
     '<section class="card"><div class="card-head"><div><h3>Supermatriz de influências</h3><p>As colunas descrevem prioridades locais dos influenciadores; o vetor de pesos é seu limite.</p></div></div>' + matrixTable(item.criteria.map(c => c.id), model.matrix, item, "Supermatriz ponderada", "Cada coluna soma 1; os valores representam influência local.") + '<p class="field-hint" style="margin:12px 0 0">Modelo ANP de um grupo. ' + (model.local.some(group => group.fuzzy) ? "Faixas fuzzy foram aplicadas às comparações locais; seus centroides normalizados formaram as colunas da supermatriz. O resultado final é pontual, sem intervalo fuzzy global. " : "") + 'A rede deve ser fortemente conectada e conter autoinfluência para garantir a convergência.</p></section>' :
     (model.fuzzy ? '<section class="card"><div class="card-head"><div><h3>Pesos fuzzy dos critérios</h3><p>Média geométrica de números triangulares; o ranking usa os centroides normalizados.</p></div></div><div class="table-scroll"><table class="matrix-table"><thead><tr><th>Critério</th><th>Inferior</th><th>Central</th><th>Superior</th><th>Usado no ranking</th></tr></thead><tbody>' + item.criteria.map((c, i) => '<tr><th>' + escapeHtml(c.name) + '</th><td>' + pct(model.fuzzy.triangles[i].l, 1) + '</td><td>' + pct(model.fuzzy.triangles[i].m, 1) + '</td><td>' + pct(model.fuzzy.triangles[i].u, 1) + '</td><td><strong>' + pct(model.weights[i], 1) + '</strong></td></tr>').join("") + '</tbody></table></div><p class="field-hint" style="margin:13px 0 0">Os limites vêm da aritmética fuzzy triangular e não são intervalos de confiança ou probabilidades. O CR é calculado apenas na matriz de valores centrais.</p></section>' :
@@ -719,19 +709,110 @@ function reportModal(item) {
 function reportHtml(item) {
   return '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Relatório DecisionLab · ' + escapeHtml(item.title) + '</title><style>body{font:14px Arial,sans-serif;color:#202b35;background:#f0ece1;margin:0;padding:32px}.report-document{max-width:900px;margin:auto;background:#fff;padding:46px;box-shadow:0 12px 34px #0002}.report-kicker{font-size:11px;letter-spacing:2px;color:#3166b6;font-weight:bold}h1{font-size:34px;margin:14px 0}h2{font-size:19px;margin:0 0 12px}p{line-height:1.5}.report-objective{color:#59636c}.report-meta{display:flex;gap:18px;flex-wrap:wrap;border-top:1px solid #bbc2c9;border-bottom:1px solid #bbc2c9;padding:12px 0;margin:25px 0;font-size:12px}.report-highlight{background:#202b35;color:#fff;padding:22px;display:flex;gap:14px;align-items:baseline;flex-wrap:wrap}.report-highlight small{width:100%;font-size:10px;letter-spacing:1px}.report-highlight strong{font-size:23px}.report-highlight b{font-size:22px;margin-left:auto;color:#f4c46b}section{margin:28px 0;break-inside:avoid}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:9px;border-bottom:1px solid #d9dde0;text-align:left}th{background:#f2f4f6}.report-table-scroll{overflow:auto}footer{border-top:1px solid #bbc2c9;padding-top:14px;color:#69747d;font-size:11px}@media print{body{background:#fff;padding:0}.report-document{box-shadow:none;padding:0}@page{margin:16mm}}</style></head><body>' + reportBody(item) + '</body></html>';
 }
+function stageEndActions(item, actions) {
+  const index = STEP_VIEWS.indexOf(state.view);
+  if (!item || index < 0 || state.reportOpen) return "";
+  const labels = ["Problema", "Modelo", "Julgamentos", "Desempenho", "Interpretação"];
+  const back = index > 0 ? '<button type="button" class="button secondary" data-action="view" data-view="' + STEP_VIEWS[index - 1] + '">' + icon('back') + ' Voltar: ' + labels[index - 1] + '</button>' : '';
+  let forward = actions || (index === STEP_VIEWS.length - 1 ? '' :
+    '<button type="button" class="button" data-action="view" data-view="' + STEP_VIEWS[index + 1] + '">' +
+    ["Entender o modelo", "Fazer os julgamentos", "Consultar os dados", "Ver o resultado"][index] + ' ' + icon('arrow') + '</button>');
+  if (state.view === "judgments") {
+    const progress = item.method === "ahp" ? comparisonProgress(item.criteria.map(c => c.id), item.comparisons.base) :
+      item.criteria.reduce((sum, c) => {
+        const influencers = item.criteria.filter(x => (item.influences[c.id] || []).includes(x.id)).map(x => x.id);
+        const local = comparisonProgress(influencers, item.comparisons.influence[c.id] || {});
+        return { completed: sum.completed + local.completed, total: sum.total + local.total };
+      }, { completed: 0, total: 0 });
+    forward = progress.completed === progress.total && item.criteria.length >= 2 ?
+      '<button type="button" class="button" data-action="view" data-view="evaluations">Avaliar alternativas ' + icon('arrow') + '</button>' :
+      '<span class="end-actions-hint" role="status">' + (progress.total - progress.completed) + ' julgamento(s) pendente(s). Continue respondendo acima.</span>';
+  }
+  if (state.view === "results" && !analyses(item).ranking) {
+    forward = '<button type="button" class="button" data-action="view" data-view="judgments">Revisar julgamentos ' + icon('arrow') + '</button>';
+  }
+  if (!back && !forward) return "";
+  return '<footer class="stage-end-actions no-print" aria-label="Ações ao final da etapa">' +
+    '<div class="stage-end-label"><span>ETAPA ' + String(index + 1).padStart(2, '0') + ' DE 05</span><strong>' + labels[index] + '</strong></div>' +
+    '<div class="stage-end-buttons">' + back + forward + '</div></footer>';
+}
+function lockGuidedExampleControls() {
+  const host = document.querySelector('.analysis-shell.guided-preview');
+  if (!host) return;
+  const selectors = ['[data-action="method"]', '[data-action="add-criterion"]', '[data-action="add-alternative"]',
+    '[data-action="remove-criterion"]', '[data-action="remove-alternative"]', '[data-action="edit-alternative"]',
+    '[data-action="focus-add-criterion"]', '[data-action="evaluation-mode"]', '[data-influence]',
+    '[data-field^="criterion-"]', '[data-field="alternative-name"]'];
+  host.querySelectorAll(selectors.join(',')).forEach(control => {
+    if ('disabled' in control) control.disabled = true;
+  });
+}
+
+function exampleOverview(item) {
+  const isAnp = item.method === "anp";
+  return pageHead(item, "ETAPA 01 DE 05 · PROBLEMA", "Entenda o exemplo", "Este caso já está preparado. Seu papel é comparar a importância dos critérios.") +
+    '<div class="workspace-grid"><div class="stack"><section class="card"><span class="eyebrow">PERGUNTA DO EXEMPLO</span><h2 class="preview-section-title">' + escapeHtml(item.title) + '</h2><p class="preview-objective">' + escapeHtml(item.objective) + '</p><span class="pill">3 CRITÉRIOS · 3 ALTERNATIVAS</span></section>' +
+    '<section class="card"><span class="eyebrow">O QUE VOCÊ VAI FAZER</span><h3>Comparar o que é mais importante</h3><p class="small muted">O exemplo já define os critérios, as alternativas e os dados de desempenho. Você só precisa julgar quais critérios têm mais importância' + (isAnp ? ' ou influência' : '') + ' usando uma escala de 1 a 9.</p>' +
+    '<div class="preview-chip-list">' + item.criteria.map(c => '<span>' + escapeHtml(c.name) + '</span>').join('') + '</div></section></div>' +
+    '<aside class="stack"><section class="card"><span class="eyebrow">MÉTODO UTILIZADO</span><h3>' + (isAnp ? 'ANP · rede de influências' : 'AHP · hierarquia de critérios') + '</h3><p class="small muted">' + (isAnp ? 'Os critérios podem influenciar uns aos outros. Você realizará comparações locais para obter prioridades.' : 'Os critérios são comparados par a par para obter pesos de importância.') + '</p></section>' +
+    '<section class="card"><h3>Alternativas deste caso</h3><div class="preview-chip-list">' + item.alternatives.map(a => '<span>' + escapeHtml(a.name) + '</span>').join('') + '</div><p class="small muted">As alternativas e seus dados são fixos nesta demonstração.</p></section></aside></div>';
+}
+function exampleStructure(item) {
+  const isAnp = item.method === "anp";
+  const ids = item.criteria.map(c => c.id);
+  const relations = isAnp ? '<section class="card"><span class="eyebrow">REDE ANP</span><h3>Quem influencia quem?</h3><p class="small muted">Para cada critério, a rede indica quais outros critérios são considerados em seus julgamentos locais. Essas relações fazem parte do exemplo e não podem ser alteradas.</p><div class="preview-relation-list">' +
+    item.criteria.map(c => '<div class="preview-relation"><strong>' + escapeHtml(c.name) + '</strong><span>É influenciado por: ' + ids.filter(id => (item.influences[c.id] || []).includes(id)).map(id => escapeHtml(criterionName(item, id))).join(', ') + '</span></div>').join('') + '</div></section>' : '';
+  return pageHead(item, "ETAPA 02 DE 05 · MODELO", isAnp ? "Conheça a rede ANP" : "Conheça a hierarquia AHP", "Observe a estrutura definida neste exemplo. Os critérios e as alternativas são fixos.") +
+    '<section class="card preview-model"><div class="card-head"><div><span class="eyebrow">ESTRUTURA DO EXEMPLO</span><h3>' + (isAnp ? 'Objetivo, rede de critérios e alternativas' : 'Objetivo, critérios e alternativas') + '</h3></div><span class="pill">SOMENTE LEITURA</span></div>' +
+    '<div class="preview-flow"><div class="preview-flow-panel preview-flow-goal"><small>OBJETIVO</small><strong>' + escapeHtml(item.objective) + '</strong></div><div class="preview-flow-arrow" aria-hidden="true">↓</div>' +
+    '<div class="preview-flow-group"><span>CRITÉRIOS</span><div>' + item.criteria.map(c => '<article><strong>' + escapeHtml(c.name) + '</strong><small>' + (c.type === 'cost' ? 'Menor valor é melhor' : 'Maior valor é melhor') + '</small></article>').join('') + '</div></div>' +
+    '<div class="preview-flow-arrow" aria-hidden="true">↓</div><div class="preview-flow-group"><span>ALTERNATIVAS</span><div>' + item.alternatives.map(a => '<article><strong>' + escapeHtml(a.name) + '</strong></article>').join('') + '</div></div></div>' +
+    '<p class="preview-model-note">' + (isAnp ? 'No ANP, os critérios também podem influenciar uns aos outros. Isso gera diferentes conjuntos de julgamentos.' : 'No AHP, você compara a importância relativa de cada par de critérios. Os pesos resultantes serão aplicados aos dados das alternativas.') + '</p></section>' + relations;
+}
+function exampleEvaluations(item) {
+  const columns = item.criteria.map(c => '<th scope="col">' + escapeHtml(c.name) + (c.unit ? '<br><small>' + escapeHtml(c.unit) + '</small>' : '') + '</th>').join('');
+  const rows = item.alternatives.map(a => '<tr><th scope="row">' + escapeHtml(a.name) + '</th>' + item.criteria.map(c => '<td>' + escapeHtml(item.evaluations[a.id]?.[c.id] ?? '—') + '</td>').join('') + '</tr>').join('');
+  return pageHead(item, "ETAPA 04 DE 05 · DESEMPENHO", "Conheça os dados das alternativas", "Os valores foram definidos previamente. Consulte-os para entender como será calculado o ranking.") +
+    '<section class="card preview-evaluations"><div class="card-head"><div><span class="eyebrow">DADOS DO EXEMPLO</span><h3>Desempenho das três alternativas</h3><p>Esta tabela é informativa: os valores não podem ser editados.</p></div><span class="pill">SOMENTE LEITURA</span></div>' +
+    '<div class="table-scroll"><table class="preview-data-table"><thead><tr><th scope="col">Alternativa</th>' + columns + '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<div class="helper"><strong>Como interpretar:</strong> os pesos vêm dos julgamentos feitos por você. Os valores de desempenho são fixos e iguais para todos que utilizam este exemplo. Isso permite comparar como preferências diferentes mudam o resultado.</div></section>';
+}
+function normalizeExample(item) {
+  const example = EXAMPLES.find(x => x.key === item?.exampleKey);
+  if (!example || !item.guided) return false;
+  // Keep the visitor's pairwise judgments, but restore every locked field from the source example.
+  item.title = example.title;
+  item.objective = example.objective;
+  item.method = example.method;
+  item.criteria = structuredClone(example.criteria);
+  item.alternatives = structuredClone(example.alternatives);
+  item.influences = Object.fromEntries(example.criteria.map(c => [c.id, example.criteria.map(x => x.id)]));
+  item.evaluationMode = 'raw';
+  item.evaluations = structuredClone(example.evaluations);
+  item.comparisons ||= {};
+  item.comparisons.base ||= {};
+  item.comparisons.influence ||= {};
+  // The public preview uses only exact 1–9 judgments. Never silently apply hidden fuzzy values.
+  item.comparisons.fuzzyBase = {};
+  item.comparisons.fuzzyInfluence = {};
+  return true;
+}
+
 function render() {
   const item = project();
   if (!item) { state.projectId = null; state.view = "home"; state.reportOpen = false; root.innerHTML = shell(home()); return; }
-  const views = { overview, structure, judgments: state.judgmentMode === "matrix" ? matrixJudgments : guidedJudgments, evaluations, results };
+  const views = { overview: exampleOverview, structure: exampleStructure, judgments: guidedJudgments, evaluations: exampleEvaluations, results };
   if (!views[state.view]) state.view = "overview";
   if (state.view !== "results") state.reportOpen = false;
-  root.innerHTML = shell(views[state.view](item) + (state.reportOpen && state.view === "results" && analyses(item).ranking ? reportModal(item) : ""));
-  requestAnimationFrame(syncStageDock);
+  state.pageActions = "";
+  const content = views[state.view](item);
+  const endActions = stageEndActions(item, state.pageActions);
+  const overlay = state.reportOpen && state.view === "results" && analyses(item).ranking ? reportModal(item) : "";
+  root.innerHTML = shell(content + endActions + overlay);
+  lockGuidedExampleControls();
   if (state.view === "structure" && item.method === "anp") requestAnimationFrame(drawNetworkEdges);
 }
 window.addEventListener("resize", drawNetworkEdges);
-window.addEventListener("scroll", syncStageDock, { passive: true });
-window.addEventListener("resize", syncStageDock);
 function download(filename, contents, type) {
   const blob = new Blob([contents], { type });
   const url = URL.createObjectURL(blob);
@@ -748,7 +829,7 @@ function fieldUpdate(element) {
   if (!item) return;
   const field = element.dataset.field;
   const id = element.dataset.id;
-  if (item.guided && (field === "title" || field === "objective")) return;
+  if (item.guided && (field === "title" || field === "objective" || field?.startsWith("criterion-") || field === "alternative-name")) return;
   if (field === "title") item.title = element.value;
   else if (field === "objective") item.objective = element.value;
   else if (field.startsWith("criterion-")) {
@@ -765,7 +846,7 @@ root.addEventListener("input", event => {
   if (element.dataset.field) fieldUpdate(element);
   if (element.dataset.eval !== undefined) {
     const item = project();
-    if (!item) return;
+    if (!item || item.guided) return;
     const alt = element.dataset.alt, criterion = element.dataset.criterion;
     item.evaluations[alt] ||= {};
     item.evaluations[alt][criterion] = element.value === "" ? null : Number(element.value);
@@ -776,6 +857,7 @@ root.addEventListener("change", event => {
   const element = event.target;
   const item = project();
   if (element.dataset.fuzzyBound && item) {
+    if (item.guided) return;
     const context = activeJudgment(item);
     if (!context?.a || context.current === null) return;
     const fuzzyStore = item.method === "anp"
@@ -803,6 +885,7 @@ root.addEventListener("change", event => {
     save(); render(); return;
   }
   if (element.dataset.influence !== undefined && item) {
+    if (item.guided) return;
     const target = element.dataset.target, source = element.dataset.source;
     item.influences[target] ||= [];
     item.influences[target] = element.checked ?
@@ -820,6 +903,7 @@ root.addEventListener("keydown", event => {
 });
 function addEntity(kind) {
   const item = project();
+  if (item?.guided) { toast("Este exemplo está limitado a 3 critérios e 3 alternativas."); return; }
   const input = document.querySelector(kind === "criterion" ? "#new-criterion" : "#new-alternative");
   const name = input?.value.trim();
   if (!item || !name) { toast("Digite um nome antes de adicionar."); return; }
@@ -913,18 +997,19 @@ root.addEventListener("click", event => {
   }
   else if (action === "home") { state.projectId = null; state.view = "home"; render(); window.scrollTo(0, 0); }
   else if (action === "new") {
-    const created = defaultProject();
-    state.projects.push(created); save(); selectProject(created.id); window.scrollTo(0, 0);
+    toast("A criação de análises personalizadas está em desenvolvimento. Escolha um dos três exemplos.");
   }
   else if (action === "demo" || action === "example") {
     const exampleKey = EXAMPLES.some(value => value.key === button.dataset.example) ? button.dataset.example : EXAMPLES[0].key;
-    const existing = [...state.projects].reverse().find(value => value.guided && value.exampleKey === exampleKey && !analyses(value).ranking);
+    const reference = EXAMPLES.find(value => value.key === exampleKey);
+    const existing = [...state.projects].reverse().find(value => value.guided && value.exampleKey === exampleKey && value.method === reference.method && value.criteria.length === 3 && value.alternatives.length === 3 && !analyses(value).ranking);
     if (existing) selectProject(existing.id);
     else { const created = demoProject(exampleKey); state.projects.push(created); save(); selectProject(created.id); }
     window.scrollTo(0, 0);
   }
   else if (action === "open") { selectProject(button.dataset.id); window.scrollTo(0, 0); }
   else if (action === "duplicate") {
+    toast("A duplicação de análises estará disponível em futuras versões."); return;
     const source = state.projects.find(value => value.id === button.dataset.id);
     if (!source) return;
     const copy = JSON.parse(JSON.stringify(source));
@@ -1002,6 +1087,7 @@ root.addEventListener("click", event => {
   else if (action === "judgment-next" && item) nextJudgment(item);
   else if (action === "judgment-jump") { state.judgmentIndex = Number(button.dataset.index); state.fuzzyCustomFor = null; render(); }
   else if (action === "fuzzy-mode" && item) {
+    if (item.guided) return;
     const context = activeJudgment(item);
     if (!context.a || context.current === null) return;
     const key = pairKey(context.a, context.b);
@@ -1023,11 +1109,12 @@ root.addEventListener("click", event => {
     if (state.judgmentMode === "matrix") renderJudgmentKeepingFocus('[data-action="fuzzy-mode"][data-mode="' + button.dataset.mode + '"]');
     else render();
   }
-  else if (action === "method" && item) { item.method = button.dataset.method; state.target = item.criteria[0]?.id || null; state.matrixPair = null; state.judgmentIndex = 0; save(); render(); }
-  else if (action === "evaluation-mode" && item) { item.evaluationMode = button.dataset.mode; save(); render(); }
+  else if (action === "method" && item) { if (item.guided) return; item.method = button.dataset.method; state.target = item.criteria[0]?.id || null; state.matrixPair = null; state.judgmentIndex = 0; save(); render(); }
+  else if (action === "evaluation-mode" && item) { if (item.guided) return; item.evaluationMode = button.dataset.mode; save(); render(); }
   else if (action === "add-criterion") addEntity("criterion");
   else if (action === "add-alternative") addEntity("alternative");
   else if (action === "remove-criterion" && item) {
+    if (item.guided) return;
     const id = button.dataset.id;
     item.criteria = item.criteria.filter(c => c.id !== id);
     delete item.influences[id];
@@ -1045,6 +1132,7 @@ root.addEventListener("click", event => {
     save(); render();
   }
   else if (action === "remove-alternative" && item) {
+    if (item.guided) return;
     const id = button.dataset.id;
     item.alternatives = item.alternatives.filter(a => a.id !== id);
     delete item.evaluations[id]; save(); render();
@@ -1061,7 +1149,7 @@ root.addEventListener("click", event => {
     download("decisionlab-" + filename(item) + "-ranking.csv", "\uFEFF" + rows.map(row => row.map(quote).join(";")).join("\r\n"), "text/csv");
     toast("Ranking CSV exportado.");
   }
-  else if (action === "import") document.querySelector("#import-file")?.click();
+  else if (action === "import") { toast("A importação estará disponível em uma versão futura."); }
   else if (action === "print" && item) { state.reportOpen = true; render(); }
   else if (action === "report-close") { state.reportOpen = false; render(); }
   else if (action === "report-download" && item) {

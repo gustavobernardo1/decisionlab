@@ -1,5 +1,12 @@
 # DecisionLab — Estúdio de decisões
 
+> **Prévia didática (novembro de 2026):** a interface pública apresenta somente três exemplos guiados,
+> cada um com três critérios e três alternativas. A criação de análises personalizadas e o modo de matriz
+> estão ocultos durante o desenvolvimento. Objetivos, critérios, alternativas, relações e
+> desempenho são fixos; somente os julgamentos 1 a 9 são interativos. O fuzzy foi ocultado.
+> As ações principais aparecem somente ao final de cada etapa, nunca no cabeçalho. Os cálculos e os dados de análises anteriores permanecem preservados.
+
+
 Plataforma local para estruturar, comparar e explicar decisões multicritério. A interface está em português e funciona sem instalar bibliotecas externas. O percurso tem cinco etapas: Problema, Modelo, Julgamentos, Desempenho e Interpretação.
 
 ## Começar
